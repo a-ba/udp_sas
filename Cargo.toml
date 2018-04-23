@@ -1,6 +1,6 @@
 [package]
 name = "udp_sas"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Anthony Baire <ayba@free.fr>"]
 description = "Source address selection for UDP sockets"
 keywords = ["udp", "IP_PKTINFO", "IPV6_RECVPKTINFO"]
