@@ -8,9 +8,10 @@ use ::libc;
 /// This type contains just a buffer enough big to hold a `libc::sockaddr_in` or
 /// `libc::sockaddr_in6` struct.
 /// 
-/// Its content can be arbitrary written using `.as_mut_ptr()`. Then a call to `.into_addr()` will
+/// Its content can be arbitrary written using `.as_mut()`. Then a call to `.into_addr()` will
 /// attempt to convert it into `std::net::SocketAddr`.
-/// 
+///
+#[derive(Copy,Clone)]
 pub struct RawSocketAddr
 {
     sa6: libc::sockaddr_in6
@@ -30,13 +31,15 @@ impl RawSocketAddr {
     /// This function will fill the internal buffer with the slice pointed by (`ptr`, `len`). If
     /// `len` is greater than the buffer size then the input is truncated.
     /// 
+    /// # Panics
+    /// 
+    /// Panics if `len` is bigger that the size of `libc::sockaddr_in6`
+    /// 
     pub unsafe fn from_raw_parts(ptr: *const u8, len: usize) -> Self
     {
-        let mut raw = RawSocketAddr{sa6: std::mem::zeroed()};
-        let len = len.min(std::mem::size_of::<Self>());
-        let src = std::slice::from_raw_parts(ptr, len);
-        let dst = std::slice::from_raw_parts_mut(&mut raw as *mut _ as *mut u8, len);
-        dst.copy_from_slice(src);
+        let mut raw = RawSocketAddr::new();
+        assert!(len <= std::mem::size_of_val(&raw.sa6));
+        raw.as_mut()[..len].copy_from_slice(std::slice::from_raw_parts(ptr, len));
         raw
     }
 
@@ -63,49 +66,85 @@ impl RawSocketAddr {
     /// 
     /// If the value of `.sa_family` resolves to `AF_INET` or `AF_INET6` then the buffer is
     /// converted into `SocketAddr`, otherwise the function returns None.
-    pub fn into_addr(&self) -> Option<SocketAddr>
+    /// 
+    pub fn into_addr(self) -> Option<SocketAddr>
     {
-        unsafe {
-            match self.sa6.sin6_family as i32 {
-                libc::AF_INET =>
-                    Some(SocketAddr::V4(*(&self.sa6 as *const _ as *const _))),
-                libc::AF_INET6 =>
-                    Some(SocketAddr::V6(*(&self.sa6 as *const _ as *const _))),
-                _ => None
-            }
-        }
+        self.into()
     }
 
-    /// Convert the internal buffer into a byte slicea
+    /// Return the length of the address
     /// 
-    /// Note: the actual length of slice depends on the value of `.sa_family` inside the buffer:
-    /// 
-    /// * `AF_INET` -> the size of `sockaddr_in`
+    /// The result depends on the value of `.sa_family` in the internal buffer:
+    /// * `AF_INET`  -> the size of `sockaddr_in`
     /// * `AF_INET6` -> the size of `sockaddr_in6`
-    /// * *other* -> 0 (and the slice origin will be the NULL pointer)
+    /// * *other* -> 0
     /// 
-    pub fn as_bytes(&self) -> &[u8]
+    pub fn len(&self) -> usize
     {
-        let len = match self.sa6.sin6_family as i32 {
+        match self.sa6.sin6_family as i32 {
             libc::AF_INET  => std::mem::size_of::<libc::sockaddr_in >(),
             libc::AF_INET6 => std::mem::size_of::<libc::sockaddr_in6>(),
             _ => 0
-        };
-        unsafe {
-            std::slice::from_raw_parts(match len {
-                0 => std::ptr::null(),
-                _ => &self.sa6 as *const _ as *const _,
-            }, len)
         }
     }
 
-    /// Convert the internal buffer into a mutable byte slice
-    pub fn as_bytes_mut(&mut self) -> &mut[u8]
+    /// Return the size of the internal buffer
+    pub fn capacity(&self) -> usize
     {
+        std::mem::size_of::<libc::sockaddr_in6>()
+    }
+
+    /// Get a pointer to the internal buffer
+    pub fn as_ptr(&self) -> *const libc::sockaddr {
+        &self.sa6 as *const _ as *const _
+    }
+
+    /// Get a mutable pointer to the internal buffer
+    pub fn as_mut_ptr(&mut self) -> *mut libc::sockaddr {
+        &mut self.sa6 as *mut _ as *mut _
+    }
+
+}
+
+impl AsRef<[u8]> for RawSocketAddr
+{
+    /// Get the internal buffer as a byte slice
+    /// 
+    /// Note: the actual length of slice depends on the value of `.sa_family` (see `.len()`)
+    /// 
+    fn as_ref(&self) -> &[u8] {
         unsafe {
-            std::slice::from_raw_parts_mut(&mut self.sa6 as *mut _ as *mut _, 
-                                           std::mem::size_of_val(&self.sa6))
+            std::slice::from_raw_parts(&self.sa6 as *const _ as *const u8, self.len())
         }
+    }
+}
+
+impl AsMut<[u8]> for RawSocketAddr
+{
+    /// Get the internal buffer as a mutable slice
+    fn as_mut(&mut self) -> &mut[u8] {
+        unsafe {
+            std::slice::from_raw_parts_mut(&mut self.sa6 as *mut _ as *mut u8, self.capacity())
+        }
+    }
+}
+
+impl Into<Option<SocketAddr>> for RawSocketAddr
+{
+    /// Attempt to convert the internal buffer into a `std::net::SocketAddr` object
+    /// 
+    /// The internal buffer is assumed to be a `libc::sockaddr`.
+    /// 
+    /// If the value of `.sa_family` resolves to `AF_INET` or `AF_INET6` then the buffer is
+    /// converted into `SocketAddr`, otherwise the function returns None.
+    /// 
+    fn into(self) -> Option<SocketAddr>
+    {
+        unsafe { match self.sa6.sin6_family as i32 {
+                libc::AF_INET   => Some(SocketAddr::V4(*(self.as_ptr() as *const _))),
+                libc::AF_INET6  => Some(SocketAddr::V6(*(self.as_ptr() as *const _))),
+                _ => None
+        }}
     }
 }
 
@@ -130,12 +169,36 @@ mod tests {
     use std::net::SocketAddrV6;
     use super::*;
 
-    fn check_bytes_mut(raw: &mut RawSocketAddr)
+    fn check_as_mut(raw: &mut RawSocketAddr)
     {
         let ptr = raw as *mut _ as usize;
-        let buf = raw.as_bytes_mut();
+        let buf = raw.as_mut();
         assert_eq!(buf.as_mut_ptr(), ptr as *mut _);
         assert_eq!(buf.len(), std::mem::size_of::<libc::sockaddr_in6>());
+    }
+
+    #[test]
+    fn ptr_and_capacity() {
+        let mut raw = RawSocketAddr::new();
+        assert_eq!(raw.as_ptr(), &raw as *const _ as *const _);
+        assert_eq!(raw.as_mut_ptr(), &mut raw as *mut _ as *mut _);
+        assert_eq!(raw.capacity(), std::mem::size_of::<libc::sockaddr_in6>());
+    }
+
+    #[test]
+    fn as_slice() {
+        let mut raw = RawSocketAddr::new();
+        {
+            let sl = raw.as_ref();
+            assert_eq!(sl.as_ptr(), &raw as *const _ as *const _);
+            assert_eq!(sl.len(), 0);
+        }
+        {
+            let ptr = &mut raw as *mut _ as *mut _;
+            let sl = raw.as_mut();
+            assert_eq!(sl.as_mut_ptr(), ptr);
+            assert_eq!(sl.len(), std::mem::size_of::<libc::sockaddr_in6>());
+        }
     }
 
     #[test]
@@ -151,14 +214,16 @@ mod tests {
             };
             let mut raw = RawSocketAddr::from_raw_parts(&sa as *const _ as *const u8,
                                                     std::mem::size_of_val(&sa));
+            assert_eq!(raw.len(),       std::mem::size_of::<libc::sockaddr_in>());
+            assert_eq!(raw.capacity(),  std::mem::size_of::<libc::sockaddr_in6>());
             assert_eq!(raw.into_addr(), Some(addr));
             assert_eq!(RawSocketAddr::from(Some(&addr)).into_addr(), Some(addr));
             {
-                let buf = raw.as_bytes();
+                let buf = raw.as_ref();
                 assert_eq!(buf.as_ptr(), &raw as *const _ as *const _);
                 assert_eq!(buf.len(), std::mem::size_of_val(&sa));
             } 
-            check_bytes_mut(&mut raw);
+            check_as_mut(&mut raw);
         }
     }
 
@@ -178,14 +243,16 @@ mod tests {
             };
             let mut raw = RawSocketAddr::from_raw_parts(&sa as *const _ as *const u8,
                                                     std::mem::size_of_val(&sa));
+            assert_eq!(raw.len(),       std::mem::size_of::<libc::sockaddr_in6>());
+            assert_eq!(raw.capacity(),  std::mem::size_of::<libc::sockaddr_in6>());
             assert_eq!(raw.into_addr(), Some(addr));
             assert_eq!(RawSocketAddr::from(Some(&addr)).into_addr(), Some(addr));
             {
-                let buf = raw.as_bytes();
+                let buf = raw.as_ref();
                 assert_eq!(buf.as_ptr(), &raw as *const _ as *const _);
                 assert_eq!(buf.len(), std::mem::size_of_val(&sa));
             }
-            check_bytes_mut(&mut raw);
+            check_as_mut(&mut raw);
         }
     }
 
@@ -195,11 +262,12 @@ mod tests {
         fn check(raw: &mut RawSocketAddr) {
             assert_eq!(raw.into_addr(), None);
             {
-                let buf = raw.as_bytes();
-                assert_eq!(buf.as_ptr(), std::ptr::null());
+                let buf = raw.as_ref();
                 assert_eq!(buf.len(), 0);
+                assert_eq!(raw.len(), 0);
+                assert_eq!(raw.capacity(), std::mem::size_of::<libc::sockaddr_in6>());
             }
-            check_bytes_mut(raw);
+            check_as_mut(raw);
         };
 
         check(&mut RawSocketAddr::new());

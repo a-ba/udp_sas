@@ -87,15 +87,15 @@ extern {
     static udp_sas_IP_PKTINFO: libc::c_int;
     fn udp_sas_recv(sock: libc::c_int, 
                  buf: *mut u8, buf_len: libc::size_t, flags: libc::c_int,
-                 src: *mut u8, src_len: libc::size_t,
-                 dst: *mut u8, dst_len: libc::size_t,
+                 src: *mut libc::sockaddr, src_len: libc::socklen_t,
+                 dst: *mut libc::sockaddr, dst_len: libc::socklen_t,
                  ) -> libc::ssize_t;
 
     fn udp_sas_send(sock: libc::c_int, 
 
                  buf: *const u8, buf_len: libc::size_t, flags: libc::c_int,
-                 src: *const u8, src_len: libc::size_t,
-                 dst: *const u8, dst_len: libc::size_t,
+                 src: *const libc::sockaddr, src_len: libc::socklen_t,
+                 dst: *const libc::sockaddr, dst_len: libc::socklen_t,
                  ) -> libc::ssize_t;
 }
 use self::udp_sas_IP_PKTINFO as IP_PKTINFO;
@@ -170,18 +170,17 @@ pub fn recv_sas(socket: RawFd, buf: &mut [u8])
     let mut dst = RawSocketAddr::new();
     
     let nb = {
-        let (sbm, dbm) = (src.as_bytes_mut(), dst.as_bytes_mut());
         unsafe {udp_sas_recv(socket,
                              buf.as_mut_ptr(), buf.len(), 0,
-                             sbm.as_mut_ptr(), sbm.len(),
-                             dbm.as_mut_ptr(), dbm.len(),
+                             src.as_mut_ptr(), src.capacity() as libc::socklen_t,
+                             dst.as_mut_ptr(), dst.capacity() as libc::socklen_t,
                              )}
     };
 
     if nb < 0 {
         Err(io::Error::last_os_error())
     } else {
-        Ok((nb as usize, src.into_addr(), dst.into_addr().map(|addr| addr.ip())))
+        Ok((nb as usize, src.into(), dst.into_addr().map(|addr| addr.ip())))
     }
 }
 
@@ -193,18 +192,16 @@ pub fn recv_sas(socket: RawFd, buf: &mut [u8])
 pub fn send_sas(socket: RawFd, buf: &[u8], target: Option<&SocketAddr>, local: Option<&IpAddr>)
     -> io::Result<usize>
 {
-    let local = match local {
+    let src = match local {
         None     => RawSocketAddr::new(),
         Some(ip) => SocketAddr::new(*ip, 0).into()
     };
-    let target = RawSocketAddr::from(target);
-
-    let (sb, db) = (local.as_bytes(), target.as_bytes());
+    let dst = RawSocketAddr::from(target);
 
     let nb = unsafe { udp_sas_send(socket,
                                    buf.as_ptr(), buf.len(), 0,
-                                   sb.as_ptr(), sb.len(),
-                                   db.as_ptr(), db.len()) };
+                                   src.as_ptr(), src.len() as libc::socklen_t,
+                                   dst.as_ptr(), dst.len() as libc::socklen_t)};
     if nb < 0 {
         Err(io::Error::last_os_error())
     } else {

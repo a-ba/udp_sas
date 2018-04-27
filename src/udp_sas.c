@@ -11,8 +11,8 @@ int udp_sas_IP_PKTINFO       = IP_PKTINFO;
 int udp_sas_IPV6_RECVPKTINFO = IPV6_RECVPKTINFO;
 
 ssize_t udp_sas_recv(int sock, void* buf, size_t buf_len, int flags,
-		void* src, size_t src_len,
-		void* dst, size_t dst_len)
+		struct sockaddr* src, socklen_t src_len,
+		struct sockaddr* dst, socklen_t dst_len)
 {
 	struct iovec iov = {
 		.iov_base = buf,
@@ -69,8 +69,8 @@ ssize_t udp_sas_recv(int sock, void* buf, size_t buf_len, int flags,
 
 
 ssize_t udp_sas_send(int sock, void* buf, size_t buf_len, int flags,
-		void* src, size_t src_len,
-		void* dst, size_t dst_len)
+		struct sockaddr* src, socklen_t src_len,
+		struct sockaddr* dst, socklen_t dst_len)
 {
 	struct iovec iov = {
 		.iov_base = buf,
