@@ -71,14 +71,13 @@
 
 
 extern crate libc;
-
-mod rawsocketaddr;
+extern crate os_socketaddr;
 
 use std::io;
 use std::net::{UdpSocket,ToSocketAddrs, SocketAddr, IpAddr};
 use std::os::unix::io::{AsRawFd,RawFd};
 
-use rawsocketaddr::RawSocketAddr;
+use os_socketaddr::OsSocketAddr;
 
 // C glue
 #[link(name="rust_udp_sas", kind="static")]
@@ -166,8 +165,8 @@ pub fn set_pktinfo(socket: RawFd) -> io::Result<()>
 pub fn recv_sas(socket: RawFd, buf: &mut [u8])
     -> io::Result<(usize, Option<SocketAddr>, Option<IpAddr>)>
 {
-    let mut src = RawSocketAddr::new();
-    let mut dst = RawSocketAddr::new();
+    let mut src = OsSocketAddr::new();
+    let mut dst = OsSocketAddr::new();
     
     let nb = {
         unsafe {udp_sas_recv(socket,
@@ -193,10 +192,10 @@ pub fn send_sas(socket: RawFd, buf: &[u8], target: Option<&SocketAddr>, local: O
     -> io::Result<usize>
 {
     let src = match local {
-        None     => RawSocketAddr::new(),
+        None     => OsSocketAddr::new(),
         Some(ip) => SocketAddr::new(*ip, 0).into()
     };
-    let dst = RawSocketAddr::from(target);
+    let dst : OsSocketAddr = target.map(|a|*a).into();
 
     let nb = unsafe { udp_sas_send(socket,
                                    buf.as_ptr(), buf.len(), 0,
