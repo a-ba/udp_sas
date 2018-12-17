@@ -1,7 +1,7 @@
-extern crate gcc;
+extern crate cc;
 
 fn main() {
-    gcc::Build::new()
+    cc::Build::new()
         .file("src/udp_sas.c")
         .compile("librust_udp_sas.a");
 }
