@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/a-ba/udp_sas"
 readme = "README.md"
 
+edition = "2018"
 build = "build.rs"
 
 [badges]
