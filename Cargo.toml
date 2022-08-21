@@ -21,4 +21,4 @@ cc = "1.0"
 
 [dependencies]
 libc  = "0.2"
-os_socketaddr = "0.1"
+os_socketaddr = "0.2.2"
